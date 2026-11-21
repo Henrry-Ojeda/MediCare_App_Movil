@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/pediatric_calculations.dart';
 import 'appointment_form_sheet.dart';
@@ -7,6 +6,8 @@ import 'appointment_form_sheet.dart';
 class AgendaScreen extends StatefulWidget {
   final List<dynamic> appointments;
   final List<dynamic> patients;
+  final int slotInterval;
+  final List<int> workingDays;
   final Future<void> Function() onRefresh;
   final void Function(Map<String, dynamic> appointment) onStartConsultationFromApt;
 
@@ -14,6 +15,8 @@ class AgendaScreen extends StatefulWidget {
     super.key,
     required this.appointments,
     required this.patients,
+    this.slotInterval = 30,
+    this.workingDays = const [1, 2, 3, 4, 5, 6],
     required this.onRefresh,
     required this.onStartConsultationFromApt,
   });
@@ -25,8 +28,6 @@ class AgendaScreen extends StatefulWidget {
 class _AgendaScreenState extends State<AgendaScreen> {
   final _api = ApiClient();
   String _scope = 'calendario'; // calendario | proximas | historico
-  int _slotInterval = 30;
-  List<int> _workingDays = [1, 2, 3, 4, 5, 6];
   late String _selectedDate;
 
   String _todayIso() {
@@ -38,111 +39,24 @@ class _AgendaScreenState extends State<AgendaScreen> {
   void initState() {
     super.initState();
     _selectedDate = _todayIso();
-    _loadPrefs();
-  }
-
-  Future<void> _loadPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _slotInterval = prefs.getInt('medicare_agenda_interval') ?? 30;
-      final savedDays = prefs.getStringList('medicare_agenda_days');
-      if (savedDays != null && savedDays.isNotEmpty) {
-        _workingDays = savedDays.map(int.parse).toList();
-      }
-    });
-  }
-
-  Future<void> _savePrefs(int interval, List<int> days) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('medicare_agenda_interval', interval);
-    await prefs.setStringList('medicare_agenda_days', days.map((d) => '$d').toList());
-    setState(() {
-      _slotInterval = interval;
-      _workingDays = days;
-    });
-  }
-
-  void _openConfigSheet() {
-    var tempInterval = _slotInterval;
-    var tempDays = List<int>.from(_workingDays);
-    const dayLabels = {1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb', 7: 'Dom'};
-
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Configurar Calendario',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              const Text('Duración por bloque', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                children: [15, 30, 45, 60].map((m) {
-                  return ChoiceChip(
-                    label: Text(m == 60 ? '1 hora' : '$m min'),
-                    selected: tempInterval == m,
-                    onSelected: (_) => setModalState(() => tempInterval = m),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 14),
-              const Text('Días que trabaja el doctor', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 6,
-                children: dayLabels.entries.map((entry) {
-                  final active = tempDays.contains(entry.key);
-                  return FilterChip(
-                    label: Text(entry.value),
-                    selected: active,
-                    onSelected: (sel) {
-                      setModalState(() {
-                        if (sel) {
-                          tempDays.add(entry.key);
-                        } else if (tempDays.length > 1) {
-                          tempDays.remove(entry.key);
-                        }
-                      });
-                    },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-              FilledButton(
-                onPressed: () {
-                  _savePrefs(tempInterval, tempDays);
-                  Navigator.pop(ctx);
-                },
-                child: const Text('Guardar Configuración'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   void _openScheduleSheet({String? prefillDate, String? prefillTime}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      builder: (_) => AppointmentFormSheet(
-        patients: widget.patients,
-        existingAppointments: widget.appointments,
-        initialDate: prefillDate ?? _selectedDate,
-        initialTime: prefillTime,
-        slotIntervalMinutes: _slotInterval,
-        workingDays: _workingDays,
-        onSaved: widget.onRefresh,
+      useSafeArea: true,
+      builder: (_) => SafeArea(
+        top: false,
+        child: AppointmentFormSheet(
+          patients: widget.patients,
+          existingAppointments: widget.appointments,
+          initialDate: prefillDate ?? _selectedDate,
+          initialTime: prefillTime,
+          slotIntervalMinutes: widget.slotInterval,
+          workingDays: widget.workingDays,
+          onSaved: widget.onRefresh,
+        ),
       ),
     );
   }
@@ -150,7 +64,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
   @override
   Widget build(BuildContext context) {
     final today = _todayIso();
-    final slots = generateTimeSlots(_slotInterval);
+    final slots = generateTimeSlots(widget.slotInterval);
 
     final scopedAppointments = widget.appointments.where((raw) {
       final a = Map<String, dynamic>.from(raw);
@@ -168,22 +82,28 @@ class _AgendaScreenState extends State<AgendaScreen> {
             children: [
               Expanded(
                 child: SegmentedButton<String>(
+                  style: SegmentedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                  ),
                   segments: const [
-                    ButtonSegment(value: 'calendario', label: Text('Calendario', style: TextStyle(fontSize: 11))),
-                    ButtonSegment(value: 'proximas', label: Text('Próximas', style: TextStyle(fontSize: 11))),
-                    ButtonSegment(value: 'historico', label: Text('Histórico', style: TextStyle(fontSize: 11))),
+                    ButtonSegment(
+                      value: 'calendario',
+                      label: Text('Calendario', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 11)),
+                    ),
+                    ButtonSegment(
+                      value: 'proximas',
+                      label: Text('Próximas', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 11)),
+                    ),
+                    ButtonSegment(
+                      value: 'historico',
+                      label: Text('Histórico', maxLines: 1, softWrap: false, style: TextStyle(fontSize: 11)),
+                    ),
                   ],
                   selected: {_scope},
                   onSelectionChanged: (s) => setState(() => _scope = s.first),
                 ),
               ),
               const SizedBox(width: 8),
-              IconButton.outlined(
-                onPressed: _openConfigSheet,
-                icon: const Icon(Icons.tune, size: 18),
-                tooltip: 'Configurar',
-              ),
-              const SizedBox(width: 4),
               IconButton.filled(
                 onPressed: () => _openScheduleSheet(),
                 icon: const Icon(Icons.add, size: 20),

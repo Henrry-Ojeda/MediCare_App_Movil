@@ -50,11 +50,14 @@ class _Patient360ScreenState extends State<Patient360Screen> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
+        builder: (ctx, setModalState) => SafeArea(
+          top: false,
+          child: Padding(
           padding: EdgeInsets.only(
             left: 20,
             right: 20,
@@ -117,6 +120,7 @@ class _Patient360ScreenState extends State<Patient360Screen> {
             ],
           ),
         ),
+      ),
       ),
     );
   }
