@@ -98,6 +98,11 @@ class ApiClient {
     return Map<String, dynamic>.from(res.data);
   }
 
+  Future<Map<String, dynamic>> updatePatient(String patientId, Map<String, dynamic> payload) async {
+    final res = await _dio.put('/patients/$patientId', data: payload);
+    return Map<String, dynamic>.from(res.data);
+  }
+
   Future<Map<String, dynamic>> getPatient360(String patientId, {int? viewerSpecialtyId}) async {
     final res = await _dio.get(
       '/patients/$patientId',
