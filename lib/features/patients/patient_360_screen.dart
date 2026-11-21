@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../core/config/specialties.dart';
 import '../../core/network/api_client.dart';
+import '../consultation/consultation_screen.dart';
 
 class Patient360Screen extends StatefulWidget {
   final String patientId;
@@ -195,6 +196,30 @@ class _Patient360ScreenState extends State<Patient360Screen> {
                   ),
                 ],
               ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () {
+          final pat = _data?['patient'] != null
+              ? Map<String, dynamic>.from(_data!['patient'])
+              : <String, dynamic>{
+                  'Id': widget.patientId,
+                  'FirstName': widget.patientName,
+                  'LastName': '',
+                };
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ConsultationScreen(
+                patient: pat,
+                onCompleted: _load,
+              ),
+            ),
+          );
+        },
+        backgroundColor: const Color(0xFF0284C7),
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.medical_services_outlined),
+        label: const Text('Iniciar Consulta'),
       ),
     );
   }

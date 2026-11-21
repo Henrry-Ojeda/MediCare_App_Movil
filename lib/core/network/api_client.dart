@@ -13,6 +13,8 @@ class ApiClient {
     defaultValue: 'http://84.247.178.194:5189/api',
   );
 
+  static void Function()? onUnauthorized;
+
   final Dio _dio;
 
   ApiClient()
@@ -33,6 +35,15 @@ class ApiClient {
           }
           handler.next(options);
         },
+        onError: (error, handler) async {
+          final status = error.response?.statusCode;
+          final path = error.requestOptions.path;
+          if (status == 401 && !path.startsWith('/auth/login')) {
+            await SecureSession.clearSession();
+            onUnauthorized?.call();
+          }
+          handler.next(error);
+        },
       ),
     );
   }
@@ -52,9 +63,38 @@ class ApiClient {
     return List<dynamic>.from(res.data);
   }
 
+  Future<Map<String, dynamic>> createAppointment(Map<String, dynamic> payload) async {
+    final res = await _dio.post('/appointments', data: payload);
+    return Map<String, dynamic>.from(res.data);
+  }
+
+  Future<void> updateAppointmentStage(String appointmentId, String stage) async {
+    await _dio.patch('/appointments/$appointmentId/stage', data: {'stage': stage});
+  }
+
+  Future<void> rescheduleAppointment(
+    String appointmentId, {
+    required String date,
+    required String time,
+  }) async {
+    await _dio.patch('/appointments/$appointmentId/reschedule', data: {
+      'date': date,
+      'time': time,
+    });
+  }
+
+  Future<void> deleteAppointment(String appointmentId) async {
+    await _dio.delete('/appointments/$appointmentId');
+  }
+
   Future<List<dynamic>> getPatients({String? q}) async {
     final res = await _dio.get('/patients', queryParameters: q != null ? {'q': q} : null);
     return List<dynamic>.from(res.data);
+  }
+
+  Future<Map<String, dynamic>> createPatient(Map<String, dynamic> payload) async {
+    final res = await _dio.post('/patients', data: payload);
+    return Map<String, dynamic>.from(res.data);
   }
 
   Future<Map<String, dynamic>> getPatient360(String patientId, {int? viewerSpecialtyId}) async {
@@ -62,6 +102,11 @@ class ApiClient {
       '/patients/$patientId',
       queryParameters: viewerSpecialtyId != null ? {'viewerSpecialtyId': viewerSpecialtyId} : null,
     );
+    return Map<String, dynamic>.from(res.data);
+  }
+
+  Future<Map<String, dynamic>> completeConsultation(Map<String, dynamic> payload) async {
+    final res = await _dio.post('/consultations', data: payload);
     return Map<String, dynamic>.from(res.data);
   }
 
@@ -89,16 +134,12 @@ class ApiClient {
     double? weightKg,
     String? specialty,
   }) async {
-    final res = await _dio.post(
-      '/ai/process-consultation',
-      data: {
-        'transcript': transcript,
-        'patientName': patientName,
-        'weightKg': weightKg,
-        'specialty': specialty,
-      },
-    );
+    final res = await _dio.post('/ai/process-consultation', data: {
+      'transcript': transcript,
+      'patientName': patientName,
+      'weightKg': weightKg,
+      'specialty': specialty ?? 'Pediatría',
+    });
     return Map<String, dynamic>.from(res.data);
   }
 }
-
