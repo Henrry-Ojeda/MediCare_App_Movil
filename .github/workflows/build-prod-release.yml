@@ -35,14 +35,18 @@ jobs:
           if [ ! -d "android" ]; then
             flutter create --org com.medicare --project-name medicare_doctor_app .
           fi
+          if ! grep -q "usesCleartextTraffic" android/app/src/main/AndroidManifest.xml; then
+            sed -i 's/<application /<application android:usesCleartextTraffic="true" /' android/app/src/main/AndroidManifest.xml
+          fi
       - run: flutter pub get
       - name: Build APK Producción
         run: |
           flutter build apk --release \
             --dart-define=MEDICARE_ENV=production \
-            --dart-define=MEDICARE_API_URL=${{ vars.PROD_MEDICARE_API_URL || 'https://api.medicare.local/api' }}
+            --dart-define=MEDICARE_API_URL=${{ vars.PROD_MEDICARE_API_URL || 'https://medi-care-ebon.vercel.app/api' }}
       - name: Subir APK Producción
         uses: actions/upload-artifact@v4
         with:
           name: medicare-doctor-prod-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
