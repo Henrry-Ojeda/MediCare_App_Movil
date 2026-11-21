@@ -25,14 +25,18 @@ jobs:
           if [ ! -d "android" ]; then
             flutter create --org com.medicare --project-name medicare_doctor_app .
           fi
+          if ! grep -q "usesCleartextTraffic" android/app/src/main/AndroidManifest.xml; then
+            sed -i 's/<application /<application android:usesCleartextTraffic="true" /' android/app/src/main/AndroidManifest.xml
+          fi
       - run: flutter pub get
       - name: Build APK QA
         run: |
           flutter build apk --release \
             --dart-define=MEDICARE_ENV=qa \
-            --dart-define=MEDICARE_API_URL=${{ vars.QA_MEDICARE_API_URL || 'https://qa-api.medicare.local/api' }}
+            --dart-define=MEDICARE_API_URL=${{ vars.QA_MEDICARE_API_URL || 'http://84.247.178.194:5190/api' }}
       - name: Subir APK QA
         uses: actions/upload-artifact@v4
         with:
           name: medicare-doctor-qa-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+
