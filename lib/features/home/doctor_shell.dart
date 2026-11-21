@@ -353,7 +353,7 @@ class _DoctorShellState extends State<DoctorShell> {
                   children: [
                     Expanded(
                       child: _ActionHeroButton(
-                        icon: Icons.stethoscope_rounded,
+                        icon: Icons.medical_services_rounded,
                         label: 'Nueva Consulta',
                         backgroundColor: Colors.white,
                         foregroundColor: const Color(0xFF0369A1),
