@@ -804,6 +804,20 @@ class _DoctorShellState extends State<DoctorShell> {
                                 ),
                               ),
                             ),
+                            IconButton(
+                              onPressed: () async {
+                                await Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => PatientFormScreen(initialPatient: p),
+                                  ),
+                                );
+                                await _refreshData();
+                              },
+                              icon: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF475569)),
+                              tooltip: 'Editar paciente',
+                              visualDensity: VisualDensity.compact,
+                            ),
                           ],
                         ),
                         const SizedBox(height: 3),
