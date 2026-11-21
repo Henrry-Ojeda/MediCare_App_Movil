@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/config/specialties.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_session.dart';
@@ -27,17 +28,79 @@ class _DoctorShellState extends State<DoctorShell> {
   String _doctorEmail = '';
   bool _loading = false;
 
+  int _slotInterval = 30;
+  List<int> _workingDays = [1, 2, 3, 4, 5, 6];
+  String _recipeOrientation = 'vertical';
+  final _recipeHeaderCtrl = TextEditingController(text: 'Consultorio Pediátrico MediCare');
+  final _recipeFooterCtrl = TextEditingController(
+    text: 'Control y seguimiento pediátrico · WhatsApp de emergencias',
+  );
+  bool _recipeShowOms = true;
+
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _loadSettings();
     _refreshData();
   }
 
   @override
   void dispose() {
     _patientSearchCtrl.dispose();
+    _recipeHeaderCtrl.dispose();
+    _recipeFooterCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _slotInterval = prefs.getInt('medicare_agenda_interval') ?? 30;
+      final savedDays = prefs.getStringList('medicare_agenda_days');
+      if (savedDays != null && savedDays.isNotEmpty) {
+        _workingDays = savedDays.map(int.parse).toList();
+      }
+      _recipeOrientation = prefs.getString('medicare_recipe_orientation') ?? 'vertical';
+      final h = prefs.getString('medicare_recipe_header');
+      if (h != null && h.isNotEmpty) _recipeHeaderCtrl.text = h;
+      final f = prefs.getString('medicare_recipe_footer');
+      if (f != null && f.isNotEmpty) _recipeFooterCtrl.text = f;
+      _recipeShowOms = prefs.getBool('medicare_recipe_show_oms') ?? true;
+    });
+  }
+
+  Future<void> _saveAgendaSettings(int interval, List<int> days) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('medicare_agenda_interval', interval);
+    await prefs.setStringList('medicare_agenda_days', days.map((d) => '$d').toList());
+    if (!mounted) return;
+    setState(() {
+      _slotInterval = interval;
+      _workingDays = days;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Configuración de agenda guardada.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _saveRecipeSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('medicare_recipe_orientation', _recipeOrientation);
+    await prefs.setString('medicare_recipe_header', _recipeHeaderCtrl.text.trim());
+    await prefs.setString('medicare_recipe_footer', _recipeFooterCtrl.text.trim());
+    await prefs.setBool('medicare_recipe_show_oms', _recipeShowOms);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Personalización de récipe guardada.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _loadProfile() async {
@@ -116,11 +179,14 @@ class _DoctorShellState extends State<DoctorShell> {
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => StatefulBuilder(
+      builder: (ctx) => SafeArea(
+        top: false,
+        child: StatefulBuilder(
         builder: (ctx, setModalState) {
           final q = searchCtrl.text.trim().toLowerCase();
           final matches = q.isEmpty
@@ -238,6 +304,7 @@ class _DoctorShellState extends State<DoctorShell> {
             ),
           );
         },
+      ),
       ),
     );
   }
@@ -808,6 +875,7 @@ class _DoctorShellState extends State<DoctorShell> {
   }
 
   Widget _buildSettingsTab() {
+    const dayLabels = {1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb', 7: 'Dom'};
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -851,6 +919,144 @@ class _DoctorShellState extends State<DoctorShell> {
           ),
         ),
         const SizedBox(height: 14),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.calendar_month_rounded, color: Color(0xFF0284C7), size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Configuración de Agenda',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Duración por bloque',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [15, 30, 45, 60].map((m) {
+                    return ChoiceChip(
+                      label: Text(m == 60 ? '1 hora' : '$m min'),
+                      selected: _slotInterval == m,
+                      onSelected: (_) => _saveAgendaSettings(m, _workingDays),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Días que trabaja el doctor',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: dayLabels.entries.map((entry) {
+                    final active = _workingDays.contains(entry.key);
+                    return FilterChip(
+                      label: Text(entry.value),
+                      selected: active,
+                      onSelected: (sel) {
+                        final next = List<int>.from(_workingDays);
+                        if (sel) {
+                          if (!next.contains(entry.key)) next.add(entry.key);
+                        } else if (next.length > 1) {
+                          next.remove(entry.key);
+                        }
+                        _saveAgendaSettings(_slotInterval, next);
+                      },
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.description_rounded, color: Color(0xFF0D9488), size: 20),
+                    SizedBox(width: 8),
+                    Text(
+                      'Personalizar Récipe',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Orientación del récipe',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: Color(0xFF475569)),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Vertical (Carta/A5)'),
+                      selected: _recipeOrientation == 'vertical',
+                      onSelected: (_) => setState(() => _recipeOrientation = 'vertical'),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Horizontal (Media hoja)'),
+                      selected: _recipeOrientation == 'horizontal',
+                      onSelected: (_) => setState(() => _recipeOrientation = 'horizontal'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _recipeHeaderCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Encabezado del consultorio',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _recipeFooterCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'Pie de página / Nota al representante',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Mostrar peso, talla y percentil OMS', style: TextStyle(fontSize: 13)),
+                  value: _recipeShowOms,
+                  onChanged: (v) => setState(() => _recipeShowOms = v),
+                ),
+                const SizedBox(height: 6),
+                FilledButton.icon(
+                  onPressed: _saveRecipeSettings,
+                  icon: const Icon(Icons.save_rounded, size: 18),
+                  label: const Text('Guardar Récipe'),
+                  style: FilledButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -916,6 +1122,8 @@ class _DoctorShellState extends State<DoctorShell> {
       AgendaScreen(
         appointments: _appointments,
         patients: _patients,
+        slotInterval: _slotInterval,
+        workingDays: _workingDays,
         onRefresh: _refreshData,
         onStartConsultationFromApt: (apt) => _openConsultation(
           _findPatientForApt(apt),
@@ -929,7 +1137,7 @@ class _DoctorShellState extends State<DoctorShell> {
       'MediCare · Clínica Pediátrica',
       'Historiales Clínicos',
       'Agenda Médica',
-      'Perfil y Seguridad',
+      'Configuración',
     ];
 
     return Scaffold(
@@ -973,9 +1181,9 @@ class _DoctorShellState extends State<DoctorShell> {
             label: 'Agenda',
           ),
           NavigationDestination(
-            icon: Icon(Icons.shield_outlined),
-            selectedIcon: Icon(Icons.shield_rounded),
-            label: 'Ajustes',
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings_rounded),
+            label: 'Config.',
           ),
         ],
       ),
