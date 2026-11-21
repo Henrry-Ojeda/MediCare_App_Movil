@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import '../../core/config/specialties.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_session.dart';
+import '../agenda/agenda_screen.dart';
+import '../consultation/consultation_screen.dart';
 import '../patients/patient_360_screen.dart';
+import '../patients/patient_form_screen.dart';
 
 class DoctorShell extends StatefulWidget {
   final VoidCallback onLock;
@@ -16,6 +19,7 @@ class _DoctorShellState extends State<DoctorShell> {
   int _tabIndex = 0;
   SpecialtyMeta _activeSpecialty = kSpecialties.first;
   final _api = ApiClient();
+  final _patientSearchCtrl = TextEditingController();
   List<dynamic> _patients = [];
   List<dynamic> _appointments = [];
 
@@ -23,6 +27,12 @@ class _DoctorShellState extends State<DoctorShell> {
   void initState() {
     super.initState();
     _refreshData();
+  }
+
+  @override
+  void dispose() {
+    _patientSearchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _refreshData() async {
@@ -39,74 +49,162 @@ class _DoctorShellState extends State<DoctorShell> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final pages = [
-      // Tab 0: Agenda de Hoy
-      RefreshIndicator(
-        onRefresh: _refreshData,
-        child: ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: _appointments.length,
-          itemBuilder: (_, i) {
-            final a = Map<String, dynamic>.from(_appointments[i]);
-            return Card(
-              margin: const EdgeInsets.only(bottom: 10),
-              child: ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.schedule)),
-                title: Text(a['PatientName']?.toString() ?? 'Paciente'),
-                subtitle: Text('${a['AppointmentTime']} · ${a['Reason']}'),
-                trailing: Chip(label: Text(a['Stage']?.toString() ?? '')),
-              ),
-            );
-          },
+  void _openConsultation(Map<String, dynamic> patient, {String? appointmentId}) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ConsultationScreen(
+          patient: patient,
+          appointmentId: appointmentId,
+          onCompleted: _refreshData,
         ),
       ),
-      // Tab 1: Pacientes
-      RefreshIndicator(
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _patientSearchCtrl.text.trim().toLowerCase();
+    final filteredPatients = query.isEmpty
+        ? _patients
+        : _patients.where((raw) {
+            final p = Map<String, dynamic>.from(raw);
+            final text =
+                '${p['FirstName']} ${p['LastName']} ${p['HistoryNumber']} ${p['GuardianName']} ${p['GuardianWhatsapp']}'
+                    .toLowerCase();
+            return text.contains(query);
+          }).toList();
+
+    final pages = [
+      // Tab 0: Agenda configurable + Histórico
+      AgendaScreen(
+        appointments: _appointments,
+        patients: _patients,
         onRefresh: _refreshData,
-        child: ListView.builder(
-          padding: const EdgeInsets.all(16),
-          itemCount: _patients.length,
-          itemBuilder: (_, i) {
-            final p = Map<String, dynamic>.from(_patients[i]);
-            final fullName = '${p['FirstName']} ${p['LastName']}';
-            return Card(
-              margin: const EdgeInsets.only(bottom: 10),
-              child: ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: Color(_activeSpecialty.colorHex).withValues(alpha: 0.12),
-                  child: Text(fullName.isNotEmpty ? fullName[0] : 'P'),
-                ),
-                title: Text(fullName, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${p['HistoryNumber']} · ${p['PrimarySpecialtyName']}'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => Patient360Screen(
-                      patientId: p['Id'].toString(),
-                      patientName: fullName,
-                      activeSpecialty: _activeSpecialty,
+        onStartConsultationFromApt: (apt) {
+          final patId = (apt['PatientId'] ?? '').toString();
+          final found = _patients.firstWhere(
+            (raw) => Map<String, dynamic>.from(raw)['Id'].toString() == patId,
+            orElse: () => {
+              'Id': patId,
+              'FirstName': apt['PatientName'] ?? 'Paciente',
+              'LastName': '',
+              'BirthDate': apt['PatientBirthDate'] ?? '2022-01-01',
+              'Sex': 'M',
+            },
+          );
+          _openConsultation(
+            Map<String, dynamic>.from(found),
+            appointmentId: apt['Id']?.toString(),
+          );
+        },
+      ),
+      // Tab 1: Pacientes (Búsqueda + Crear + Historial / Consulta)
+      Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _patientSearchCtrl,
+                    onChanged: (_) => setState(() {}),
+                    decoration: const InputDecoration(
+                      hintText: 'Buscar por niño, historia o representante...',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                      isDense: true,
                     ),
                   ),
                 ),
-              ),
-            );
-          },
-        ),
-      ),
-      // Tab 2: Copiloto IA Rápido
-      const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            'Dictado Clínico con Copiloto Gemini AI\n(Conectado a POST /api/ai/process-consultation)',
-            textAlign: TextAlign.center,
+                const SizedBox(width: 8),
+                FilledButton.icon(
+                  onPressed: () async {
+                    final result = await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PatientFormScreen()),
+                    );
+                    await _refreshData();
+                    if (result is Map && result['patient'] != null && mounted) {
+                      final pat = Map<String, dynamic>.from(result['patient']);
+                      if (result['startConsultation'] == true) {
+                        _openConsultation(pat);
+                      } else {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => Patient360Screen(
+                              patientId: pat['Id'].toString(),
+                              patientName: '${pat['FirstName']} ${pat['LastName']}',
+                              activeSpecialty: _activeSpecialty,
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.person_add_alt_1, size: 18),
+                  label: const Text('Nuevo', style: TextStyle(fontSize: 12)),
+                ),
+              ],
+            ),
           ),
-        ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _refreshData,
+              child: filteredPatients.isEmpty
+                  ? ListView(
+                      children: const [
+                        SizedBox(height: 80),
+                        Center(child: Text('No se encontraron pacientes.')),
+                      ],
+                    )
+                  : ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      itemCount: filteredPatients.length,
+                      itemBuilder: (_, i) {
+                        final p = Map<String, dynamic>.from(filteredPatients[i]);
+                        final fullName = '${p['FirstName']} ${p['LastName']}'.trim();
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor:
+                                  Color(_activeSpecialty.colorHex).withValues(alpha: 0.12),
+                              child: Text(fullName.isNotEmpty ? fullName[0] : 'P'),
+                            ),
+                            title: Text(fullName, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text('${p['HistoryNumber'] ?? ''} · ${p['PrimarySpecialtyName'] ?? 'Pediatría'}'),
+                            trailing: Wrap(
+                              spacing: 6,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.medical_services_outlined, color: Color(0xFF0284C7)),
+                                  tooltip: 'Iniciar Consulta',
+                                  onPressed: () => _openConsultation(p),
+                                ),
+                              ],
+                            ),
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => Patient360Screen(
+                                  patientId: p['Id'].toString(),
+                                  patientName: fullName,
+                                  activeSpecialty: _activeSpecialty,
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ),
+        ],
       ),
-      // Tab 3: Seguridad y Especialidad
+      // Tab 2: Ajustes y Seguridad
       ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -148,29 +246,31 @@ class _DoctorShellState extends State<DoctorShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
           children: [
-            const Text('MediCare Doctor', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            Text(
-              _activeSpecialty.name,
-              style: TextStyle(fontSize: 11, color: Color(_activeSpecialty.colorHex)),
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: Color(_activeSpecialty.colorHex),
+                shape: BoxShape.circle,
+              ),
             ),
+            const SizedBox(width: 8),
+            Text('MediCare · ${_activeSpecialty.name}', style: const TextStyle(fontSize: 17)),
           ],
         ),
       ),
       body: pages[_tabIndex],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
-        onDestinationSelected: (idx) => setState(() => _tabIndex = idx),
+        onDestinationSelected: (i) => setState(() => _tabIndex = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.calendar_today_outlined), label: 'Hoy'),
+          NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'Agenda'),
           NavigationDestination(icon: Icon(Icons.people_outline), label: 'Pacientes'),
-          NavigationDestination(icon: Icon(Icons.mic_none), label: 'Consulta IA'),
-          NavigationDestination(icon: Icon(Icons.shield_outlined), label: 'Seguridad'),
+          NavigationDestination(icon: Icon(Icons.shield_outlined), label: 'Ajustes'),
         ],
       ),
     );
   }
 }
-

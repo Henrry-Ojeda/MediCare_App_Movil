@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'core/network/api_client.dart';
 import 'features/auth/login_screen.dart';
 import 'features/home/doctor_shell.dart';
 
@@ -21,6 +22,9 @@ class _MediCareDoctorAppState extends State<MediCareDoctorApp> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    ApiClient.onUnauthorized = () {
+      if (mounted) setState(() => _unlocked = false);
+    };
   }
 
   @override
