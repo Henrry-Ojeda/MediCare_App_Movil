@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../core/config/app_version.dart';
 import '../../core/config/specialties.dart';
 import '../../core/network/api_client.dart';
 import '../../core/security/secure_session.dart';
@@ -27,6 +29,7 @@ class _DoctorShellState extends State<DoctorShell> {
   String _doctorName = 'Médico';
   String _doctorEmail = '';
   bool _loading = false;
+  bool _checkingUpdate = false;
 
   int _slotInterval = 30;
   List<int> _workingDays = [1, 2, 3, 4, 5, 6];
@@ -101,6 +104,83 @@ class _DoctorShellState extends State<DoctorShell> {
         duration: Duration(seconds: 2),
       ),
     );
+  }
+
+  Future<void> _checkForUpdates() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    try {
+      final info = await _api.checkAppUpdate();
+      if (!mounted) return;
+      final remoteVersion = (info['version'] ?? kAppVersion).toString();
+      final remoteBuild = int.tryParse((info['buildNumber'] ?? '').toString()) ?? 0;
+      final notes = (info['notes'] ?? '').toString();
+      final downloadUrl = (info['apkUrl'] ?? info['downloadPageUrl'] ?? '').toString();
+
+      final hasUpdate = isNewerAppVersion(
+        remoteVersion: remoteVersion,
+        remoteBuildNumber: remoteBuild,
+      );
+
+      if (!hasUpdate) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Tu app está actualizada (v$kAppVersion · Build $kAppBuildNumber).'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Nueva versión disponible: v$remoteVersion'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Instalada: v$kAppVersion (Build $kAppBuildNumber)\nDisponible: v$remoteVersion (Build $remoteBuild)',
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              if (notes.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(notes, style: const TextStyle(fontSize: 12.5, color: Color(0xFF475569))),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Más tarde'),
+            ),
+            if (downloadUrl.isNotEmpty)
+              FilledButton.icon(
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  final uri = Uri.tryParse(downloadUrl);
+                  if (uri != null) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                },
+                icon: const Icon(Icons.download_rounded, size: 18),
+                label: const Text('Descargar APK'),
+              ),
+          ],
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo consultar actualizaciones. Verifica tu conexión.'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _checkingUpdate = false);
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -1072,6 +1152,52 @@ class _DoctorShellState extends State<DoctorShell> {
               onChanged: (val) {
                 if (val != null) setState(() => _activeSpecialty = val);
               },
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE0F2FE),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.system_update_rounded, color: Color(0xFF0284C7)),
+                ),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Versión de la App',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'v$kAppVersion (Build $kAppBuildNumber)',
+                        style: TextStyle(fontSize: 12.5, color: Color(0xFF475569)),
+                      ),
+                    ],
+                  ),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _checkingUpdate ? null : _checkForUpdates,
+                  icon: _checkingUpdate
+                      ? const SizedBox(
+                          width: 15,
+                          height: 15,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Buscar', style: TextStyle(fontSize: 12.5)),
+                ),
+              ],
             ),
           ),
         ),

@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import '../config/app_version.dart';
 import '../security/secure_session.dart';
 
 class ApiClient {
@@ -140,6 +141,20 @@ class ApiClient {
       'weightKg': weightKg,
       'specialty': specialty ?? 'Pediatría',
     });
+    return Map<String, dynamic>.from(res.data);
+  }
+
+  Future<Map<String, dynamic>> checkAppUpdate() async {
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 15),
+      ),
+    );
+    final res = await dio.get(
+      kVersionManifestUrl,
+      queryParameters: {'t': DateTime.now().millisecondsSinceEpoch},
+    );
     return Map<String, dynamic>.from(res.data);
   }
 }
