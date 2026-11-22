@@ -4,11 +4,13 @@ import '../../core/utils/pediatric_calculations.dart';
 
 class PatientFormScreen extends StatefulWidget {
   final bool compact;
+  final Map<String, dynamic>? initialPatient;
   final void Function(Map<String, dynamic> createdPatient, bool startConsultation)? onCreated;
 
   const PatientFormScreen({
     super.key,
     this.compact = false,
+    this.initialPatient,
     this.onCreated,
   });
 
@@ -35,6 +37,32 @@ class _PatientFormScreenState extends State<PatientFormScreen> {
   int _gestationalWeeks = 39;
   double _birthWeightKg = 3.2;
   bool _saving = false;
+
+  bool get _isEditing => widget.initialPatient != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final p = widget.initialPatient;
+    if (p != null) {
+      _firstNameCtrl.text = (p['FirstName'] ?? '').toString();
+      _lastNameCtrl.text = (p['LastName'] ?? '').toString();
+      _guardianNameCtrl.text = (p['GuardianName'] ?? '').toString();
+      _guardianDocCtrl.text = (p['GuardianIdDocument'] ?? p['IdDocument'] ?? '').toString();
+      _guardianWhatsappCtrl.text = (p['GuardianWhatsapp'] ?? '').toString();
+      _allergiesCtrl.text = (p['Allergies'] ?? '').toString();
+      final rawSex = (p['Sex'] ?? 'M').toString().toUpperCase();
+      if (rawSex == 'M' || rawSex == 'F') _sex = rawSex;
+      final rawBirth = (p['BirthDate'] ?? '').toString().split('T').first;
+      if (rawBirth.length >= 10) _birthDate = rawBirth;
+      final rawBlood = (p['BloodType'] ?? '').toString();
+      if (rawBlood.isNotEmpty) _bloodType = rawBlood;
+      final rawRel = (p['GuardianRelation'] ?? '').toString();
+      if (['Madre', 'Padre', 'Representante Legal'].contains(rawRel)) {
+        _guardianRelation = rawRel;
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -97,10 +125,12 @@ class _PatientFormScreenState extends State<PatientFormScreen> {
         },
       };
 
-      final res = await _api.createPatient(payload);
+      final res = _isEditing
+          ? await _api.updatePatient(widget.initialPatient!['Id'].toString(), payload)
+          : await _api.createPatient(payload);
       final created = <String, dynamic>{
-        'Id': res['id'] ?? res['Id'] ?? 'pat-${DateTime.now().millisecondsSinceEpoch}',
-        'HistoryNumber': res['historyNumber'] ?? res['HistoryNumber'] ?? 'HC-NUEVO',
+        'Id': res['id'] ?? res['Id'] ?? widget.initialPatient?['Id'] ?? 'pat-${DateTime.now().millisecondsSinceEpoch}',
+        'HistoryNumber': res['historyNumber'] ?? res['HistoryNumber'] ?? widget.initialPatient?['HistoryNumber'] ?? 'HC-NUEVO',
         'FirstName': first,
         'LastName': last,
         'Sex': _sex,
@@ -114,12 +144,12 @@ class _PatientFormScreenState extends State<PatientFormScreen> {
       if (widget.onCreated != null) {
         widget.onCreated!(created, startConsultation);
       } else {
-        Navigator.pop(context, {'patient': created, 'startConsultation': startConsultation});
+        Navigator.pop(context, {'patient': created, 'startConsultation': _isEditing ? false : startConsultation});
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al crear paciente: $e')),
+          SnackBar(content: Text('Error al guardar paciente: $e')),
         );
       }
     } finally {
@@ -319,7 +349,7 @@ class _PatientFormScreenState extends State<PatientFormScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          if (!widget.compact) ...[
+          if (!widget.compact && !_isEditing) ...[
             OutlinedButton.icon(
               onPressed: _saving ? null : () => _submit(false),
               icon: const Icon(Icons.person_add_alt_1),
@@ -328,13 +358,19 @@ class _PatientFormScreenState extends State<PatientFormScreen> {
             const SizedBox(height: 10),
           ],
           FilledButton.icon(
-            onPressed: _saving ? null : () => _submit(true),
+            onPressed: _saving ? null : () => _submit(!_isEditing),
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFF0284C7),
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
-            icon: const Icon(Icons.medical_services_outlined),
-            label: Text(_saving ? 'Guardando...' : 'Guardar e Iniciar Consulta'),
+            icon: Icon(_isEditing ? Icons.save_rounded : Icons.medical_services_outlined),
+            label: Text(
+              _saving
+                  ? 'Guardando...'
+                  : _isEditing
+                      ? 'Guardar Cambios'
+                      : 'Guardar e Iniciar Consulta',
+            ),
           ),
         ],
       ),
@@ -343,7 +379,7 @@ class _PatientFormScreenState extends State<PatientFormScreen> {
     if (widget.compact) return formBody;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Nuevo Paciente Pediátrico')),
+      appBar: AppBar(title: Text(_isEditing ? 'Editar Paciente' : 'Nuevo Paciente Pediátrico')),
       body: formBody,
     );
   }
