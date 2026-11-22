@@ -46,17 +46,53 @@ jobs:
               perms.append('    <uses-permission android:name="android.permission.USE_BIOMETRIC" />')
           if perms:
               txt = re.sub(r'(<application\b)', "\n".join(perms) + r'\n    \1', txt, count=1)
+          txt = re.sub(r'android:label="[^"]+"', 'android:label="MediCare Doctor"', txt)
           if "usesCleartextTraffic" not in txt:
-              txt = re.sub(r'<application\b', '<application android:usesCleartextTraffic="true"', txt, count=1)
+              txt = re.sub(r'<application\b', '<application android:usesCleartextTraffic="false"', txt, count=1)
           p.write_text(txt, encoding="utf-8")
           assert "android.permission.INTERNET" in txt, "Missing INTERNET permission"
-          assert "usesCleartextTraffic" in txt, "Missing usesCleartextTraffic"
+          assert 'android:usesCleartextTraffic="false"' in txt, "Missing HTTPS-only usesCleartextTraffic=false"
           print(txt)
           PY
+      - name: Configurar firma Release Play Store si existen Secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ] && [ -n "$STORE_PASS" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASS" ]; then
+            echo "$KEYSTORE_B64" | base64 --decode > android/app/upload-keystore.jks
+            cat <<EOF > android/key.properties
+          storePassword=$STORE_PASS
+          keyPassword=$KEY_PASS
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+            python3 - <<'PY'
+          import pathlib
+          kts = pathlib.Path("android/app/build.gradle.kts")
+          if kts.exists():
+              txt = kts.read_text(encoding="utf-8")
+              if "key.properties" not in txt:
+                  header = 'import java.util.Properties\nimport java.io.FileInputStream\nval keystoreProperties = Properties()\nval keystorePropertiesFile = rootProject.file("key.properties")\nif (keystorePropertiesFile.exists()) { keystoreProperties.load(FileInputStream(keystorePropertiesFile)) }\n'
+                  txt = header + txt
+                  signing = 'signingConfigs { create("release") { keyAlias = keystoreProperties.getProperty("keyAlias"); keyPassword = keystoreProperties.getProperty("keyPassword"); storeFile = file(keystoreProperties.getProperty("storeFile")); storePassword = keystoreProperties.getProperty("storePassword") } }\n    buildTypes {'
+                  txt = txt.replace("buildTypes {", signing, 1)
+                  txt = txt.replace("signingConfig = signingConfigs.getByName(\"debug\")", "signingConfig = signingConfigs.getByName(\"release\")")
+                  kts.write_text(txt, encoding="utf-8")
+          PY
+            echo "Firma de producción configurada."
+          else
+            echo "Sin secrets ANDROID_KEYSTORE_*; compilando con firma debug temporal."
+          fi
       - run: flutter pub get
-      - name: Build APK Producción
+      - name: Build APK y AppBundle (.aab) Producción
         run: |
           flutter build apk --release \
+            --dart-define=MEDICARE_ENV=production \
+            --dart-define=MEDICARE_API_URL=${{ vars.PROD_MEDICARE_API_URL || 'https://medi-care-ebon.vercel.app/api' }}
+          flutter build appbundle --release \
             --dart-define=MEDICARE_ENV=production \
             --dart-define=MEDICARE_API_URL=${{ vars.PROD_MEDICARE_API_URL || 'https://medi-care-ebon.vercel.app/api' }}
       - name: Subir APK Producción
@@ -64,4 +100,9 @@ jobs:
         with:
           name: medicare-doctor-prod-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+      - name: Subir AppBundle (.aab) Play Store
+        uses: actions/upload-artifact@v4
+        with:
+          name: medicare-doctor-prod-aab
+          path: build/app/outputs/bundle/release/app-release.aab
 
