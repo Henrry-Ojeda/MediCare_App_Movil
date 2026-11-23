@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../core/config/specialties.dart';
 import '../../core/network/api_client.dart';
+import '../../core/security/secure_session.dart';
 import '../consultation/consultation_screen.dart';
 
 class Patient360Screen extends StatefulWidget {
@@ -23,6 +25,8 @@ class _Patient360ScreenState extends State<Patient360Screen> {
   final _api = ApiClient();
   bool _loading = true;
   Map<String, dynamic>? _data;
+  List<Map<String, dynamic>> _permissions = [];
+  String? _currentUserId;
 
   @override
   void initState() {
@@ -33,13 +37,46 @@ class _Patient360ScreenState extends State<Patient360Screen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final res = await _api.getPatient360(
-        widget.patientId,
-        viewerSpecialtyId: widget.activeSpecialty.id,
-      );
-      if (mounted) setState(() => _data = res);
+      final results = await Future.wait([
+        _api.getPatient360(
+          widget.patientId,
+          viewerSpecialtyId: widget.activeSpecialty.id,
+        ),
+        _api.listDiagnosisPermissions(patientId: widget.patientId).catchError((_) => <Map<String, dynamic>>[]),
+        SecureSession.getUserId(),
+      ]);
+      if (mounted) {
+        setState(() {
+          _data = results[0] as Map<String, dynamic>;
+          _permissions = results[1] as List<Map<String, dynamic>>;
+          _currentUserId = results[2] as String?;
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _requestDiagnosisAccess(String consultationId, String? authorDoctorId) async {
+    try {
+      await _api.requestDiagnosisPermission(
+        patientId: widget.patientId,
+        consultationId: consultationId,
+        authorDoctorUserId: authorDoctorId,
+        reason: 'Solicitud desde app móvil para continuidad asistencial',
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Solicitud de permiso enviada al médico tratante.')),
+        );
+      }
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo solicitar permiso: $e')),
+        );
+      }
     }
   }
 
@@ -158,25 +195,151 @@ class _Patient360ScreenState extends State<Patient360Screen> {
                     itemCount: consultations.length,
                     itemBuilder: (_, i) {
                       final c = Map<String, dynamic>.from(consultations[i]);
-                      final hasAccess = c['hasDiagnosisAccess'] == true;
+                      final consId = (c['Id'] ?? c['id'] ?? '').toString();
+                      final authorId = (c['DoctorUserId'] ?? c['doctorUserId'] ?? '').toString();
+                      final doctorName = (c['DoctorName'] ?? c['doctorName'] ?? 'Médico').toString();
+                      final hasAccess = c['hasDiagnosisAccess'] == true || c['HasDiagnosisAccess'] == true;
+                      final isOwn = _currentUserId != null && _currentUserId == authorId;
+                      final rxList = (c['Prescriptions'] ?? c['prescriptions'] ?? []) as List<dynamic>;
+                      final patientGuide = (c['PatientGuide'] ?? c['patientGuide'] ?? '').toString();
+                      List<String> alarmSigns = [];
+                      try {
+                        final rawAlarms = c['AlarmSignsJson'] ?? c['alarmSignsJson'] ?? '[]';
+                        final decoded = rawAlarms is String ? jsonDecode(rawAlarms) : rawAlarms;
+                        if (decoded is List) {
+                          alarmSigns = decoded.map((e) => e.toString()).toList();
+                        }
+                      } catch (_) {}
+
+                      final pendingForCons = _permissions
+                          .where((p) =>
+                              (p['status']?.toString() ?? '') == 'PENDING' &&
+                              (p['consultationId'] == null || p['consultationId']?.toString() == consId))
+                          .toList();
+                      final myPending = pendingForCons.any(
+                        (p) => _currentUserId != null && p['targetDoctorUserId']?.toString() == _currentUserId,
+                      );
+
                       return Card(
                         margin: const EdgeInsets.only(bottom: 12),
-                        child: ListTile(
-                          leading: Icon(
-                            hasAccess ? Icons.medical_information_outlined : Icons.lock_outline,
-                            color: hasAccess ? const Color(0xFF0284C7) : const Color(0xFFD97706),
-                          ),
-                          title: Text(
-                            hasAccess
-                                ? '${c['Cie10Code']} — ${c['Cie10Name']}'
-                                : 'Diagnóstico Protegido (${c['SpecialtyName']})',
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                          ),
-                          subtitle: Text(
-                            hasAccess
-                                ? '${c['DoctorName']} · ${c['Reason']}'
-                                : 'Requiere permiso del médico remitente. Revisa la pestaña Exámenes.',
-                            style: const TextStyle(fontSize: 12),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    hasAccess ? Icons.medical_information_outlined : Icons.lock_outline,
+                                    color: hasAccess ? const Color(0xFF0284C7) : const Color(0xFFD97706),
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      hasAccess
+                                          ? '${c['Cie10Code']} — ${c['Cie10Name']}'
+                                          : 'Diagnóstico Protegido (${c['SpecialtyName'] ?? 'Pediatría'})',
+                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'Médico: $doctorName',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF475569), fontWeight: FontWeight.w600),
+                              ),
+                              const SizedBox(height: 6),
+                              if (hasAccess) ...[
+                                Text('${c['Reason'] ?? ''}', style: const TextStyle(fontSize: 12)),
+                                if ((c['PhysicalExamSummary'] ?? '').toString().isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Examen físico: ${c['PhysicalExamSummary']}',
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                  ),
+                                ],
+                                if (patientGuide.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Guía y Cuidados: $patientGuide',
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF0369A1)),
+                                  ),
+                                ],
+                                if (alarmSigns.isNotEmpty) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Signos de Alarma: ${alarmSigns.join(' · ')}',
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFFBE123C)),
+                                  ),
+                                ],
+                              ] else ...[
+                                const Text(
+                                  'Anamnesis, examen físico, diagnóstico CIE-10, guía de cuidados y signos de alarma privados.',
+                                  style: TextStyle(fontSize: 11, color: Color(0xFFB45309)),
+                                ),
+                                const SizedBox(height: 8),
+                                if (myPending)
+                                  const Chip(
+                                    label: Text('Solicitud pendiente de aprobación', style: TextStyle(fontSize: 11)),
+                                    backgroundColor: Color(0xFFFEF3C7),
+                                  )
+                                else
+                                  OutlinedButton.icon(
+                                    onPressed: () => _requestDiagnosisAccess(consId, authorId),
+                                    icon: const Icon(Icons.lock_open_outlined, size: 16),
+                                    label: const Text('Solicitar permiso de diagnóstico', style: TextStyle(fontSize: 12)),
+                                  ),
+                              ],
+                              if (rxList.isNotEmpty) ...[
+                                const Divider(height: 16),
+                                const Text(
+                                  'Récipe / Tratamiento indicado:',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                ),
+                                const SizedBox(height: 4),
+                                ...rxList.map((rx) {
+                                  final m = Map<String, dynamic>.from(rx as Map);
+                                  return Text(
+                                    '• ${m['MedicationName'] ?? m['medicationName']} — ${m['DosePerTake'] ?? m['dosePerTake']} c/${m['FrequencyHours'] ?? m['frequencyHours']}h x ${m['DurationDays'] ?? m['durationDays']}d',
+                                    style: const TextStyle(fontSize: 11, color: Color(0xFF334155)),
+                                  );
+                                }),
+                              ],
+                              if (isOwn && pendingForCons.isNotEmpty) ...[
+                                const Divider(height: 16),
+                                const Text(
+                                  'Solicitudes pendientes:',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                                ),
+                                const SizedBox(height: 6),
+                                ...pendingForCons.map((req) => Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            '${req['targetDoctorName'] ?? 'Médico'}',
+                                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                                          ),
+                                        ),
+                                        TextButton(
+                                          onPressed: () async {
+                                            await _api.approveDiagnosisPermission(req['id'].toString());
+                                            await _load();
+                                          },
+                                          child: const Text('Aprobar'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () async {
+                                            await _api.rejectDiagnosisPermission(req['id'].toString());
+                                            await _load();
+                                          },
+                                          child: const Text('Rechazar', style: TextStyle(color: Colors.red)),
+                                        ),
+                                      ],
+                                    )),
+                              ],
+                            ],
                           ),
                         ),
                       );
@@ -202,6 +365,10 @@ class _Patient360ScreenState extends State<Patient360Screen> {
               ),
         floatingActionButton: FloatingActionButton.extended(
           onPressed: () {
+            final vitalsHistory = (_data?['vitalsHistory'] as List<dynamic>?) ?? [];
+            final prevVitals = vitalsHistory.isNotEmpty
+                ? Map<String, dynamic>.from(vitalsHistory.first as Map)
+                : null;
             final pat = _data?['patient'] != null
                 ? Map<String, dynamic>.from(_data!['patient'])
                 : <String, dynamic>{
@@ -214,6 +381,7 @@ class _Patient360ScreenState extends State<Patient360Screen> {
               MaterialPageRoute(
                 builder: (_) => ConsultationScreen(
                   patient: pat,
+                  previousVitals: prevVitals,
                   onCompleted: _load,
                 ),
               ),

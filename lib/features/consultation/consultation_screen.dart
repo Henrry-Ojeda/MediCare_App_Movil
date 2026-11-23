@@ -6,12 +6,14 @@ import '../../core/utils/pediatric_calculations.dart';
 class ConsultationScreen extends StatefulWidget {
   final Map<String, dynamic> patient;
   final String? appointmentId;
+  final Map<String, dynamic>? previousVitals;
   final VoidCallback onCompleted;
 
   const ConsultationScreen({
     super.key,
     required this.patient,
     this.appointmentId,
+    this.previousVitals,
     required this.onCompleted,
   });
 
@@ -52,13 +54,30 @@ class _ConsultationScreenState extends State<ConsultationScreen> {
   bool _showSkin = false;
 
   String? _activeAppointmentId;
+  Map<String, dynamic>? _previousVitals;
 
   @override
   void initState() {
     super.initState();
     _activeAppointmentId = widget.appointmentId;
+    _previousVitals = widget.previousVitals;
     _loadFieldPrefs();
     _ensureWalkInAppointment();
+    if (_previousVitals == null) {
+      _loadPreviousVitals();
+    }
+  }
+
+  Future<void> _loadPreviousVitals() async {
+    final pid = (widget.patient['Id'] ?? widget.patient['id'] ?? '').toString();
+    if (pid.isEmpty) return;
+    try {
+      final res = await _api.getPatient360(pid);
+      final list = (res['vitalsHistory'] as List<dynamic>?) ?? [];
+      if (list.isNotEmpty && mounted) {
+        setState(() => _previousVitals = Map<String, dynamic>.from(list.first as Map));
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadFieldPrefs() async {
@@ -440,21 +459,60 @@ class _ConsultationScreenState extends State<ConsultationScreen> {
                     ],
                   ),
                   const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Text(
-                      'OMS ($ageMonths m): ${oms.statusLabel} · Peso ${oms.weightPercentile} · Talla ${oms.heightPercentile}${oms.headStatusLabel != null ? ' · ${oms.headStatusLabel}' : ''}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF065F46),
+                  if (_previousVitals != null) ...[
+                    Builder(builder: (_) {
+                      final prevW = double.tryParse((_previousVitals!['WeightKg'] ?? _previousVitals!['weightKg'] ?? 0).toString()) ?? 0;
+                      final prevH = double.tryParse((_previousVitals!['HeightCm'] ?? _previousVitals!['heightCm'] ?? 0).toString()) ?? 0;
+                      final prevDate = (_previousVitals!['RecordedAt'] ?? _previousVitals!['recordedAt'] ?? '').toString().split('T').first;
+                      final dw = weight - prevW;
+                      final dh = height - prevH;
+                      return Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Análisis Comparativo: Actual vs. Anterior vs. OMS',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '1. Actual: ${weight.toStringAsFixed(1)} kg (${dw >= 0 ? '+' : ''}${dw.toStringAsFixed(2)} kg) · ${height.toStringAsFixed(1)} cm (${dh >= 0 ? '+' : ''}${dh.toStringAsFixed(1)} cm) · IMC ${oms.bmi}',
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF0369A1), fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              '2. Anterior ($prevDate): ${prevW.toStringAsFixed(1)} kg · ${prevH.toStringAsFixed(1)} cm',
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                            ),
+                            Text(
+                              '3. OMS ($ageMonths m): ${oms.statusLabel} · Peso ${oms.weightPercentile} · Talla ${oms.heightPercentile}${oms.headStatusLabel != null ? ' · ${oms.headStatusLabel}' : ''}',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF065F46)),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ] else
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFECFDF5),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        'Primera evaluación · OMS ($ageMonths m): ${oms.statusLabel} · Peso ${oms.weightPercentile} · Talla ${oms.heightPercentile}${oms.headStatusLabel != null ? ' · ${oms.headStatusLabel}' : ''}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF065F46),
+                        ),
                       ),
                     ),
-                  ),
                 ],
               ),
             ),

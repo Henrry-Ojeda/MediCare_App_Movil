@@ -90,6 +90,9 @@ class _LoginScreenState extends State<LoginScreen> {
         token: res['token'] as String,
         doctorName: user['name'] as String? ?? 'Médico',
         email: user['email'] as String? ?? cleanId,
+        userId: user['id']?.toString(),
+        roleCode: user['roleCode']?.toString(),
+        dictationEnabled: user['dictationEnabled'] == true,
       );
       await SecureSession.setBiometricEnabled(true);
       if (mounted) widget.onAuthenticated();

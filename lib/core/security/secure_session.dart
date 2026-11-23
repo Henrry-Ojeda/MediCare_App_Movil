@@ -8,6 +8,9 @@ class SecureSession {
   static final _localAuth = LocalAuthentication();
 
   static const _kTokenKey = 'medicare_jwt_token';
+  static const _kUserIdKey = 'medicare_user_id';
+  static const _kRoleCodeKey = 'medicare_role_code';
+  static const _kDictationEnabledKey = 'medicare_dictation_enabled';
   static const _kDoctorNameKey = 'medicare_doctor_name';
   static const _kDoctorEmailKey = 'medicare_doctor_email';
   static const _kBiometricEnabledKey = 'medicare_biometric_enabled';
@@ -16,13 +19,30 @@ class SecureSession {
     required String token,
     required String doctorName,
     required String email,
+    String? userId,
+    String? roleCode,
+    bool dictationEnabled = false,
   }) async {
     await _storage.write(key: _kTokenKey, value: token);
     await _storage.write(key: _kDoctorNameKey, value: doctorName);
     await _storage.write(key: _kDoctorEmailKey, value: email);
+    if (userId != null) {
+      await _storage.write(key: _kUserIdKey, value: userId);
+    }
+    if (roleCode != null) {
+      await _storage.write(key: _kRoleCodeKey, value: roleCode);
+    }
+    await _storage.write(
+      key: _kDictationEnabledKey,
+      value: dictationEnabled ? '1' : '0',
+    );
   }
 
   static Future<String?> getToken() => _storage.read(key: _kTokenKey);
+  static Future<String?> getUserId() => _storage.read(key: _kUserIdKey);
+  static Future<String?> getRoleCode() => _storage.read(key: _kRoleCodeKey);
+  static Future<bool> isDictationEnabled() async =>
+      (await _storage.read(key: _kDictationEnabledKey)) == '1';
   static Future<String?> getDoctorName() => _storage.read(key: _kDoctorNameKey);
   static Future<String?> getDoctorEmail() => _storage.read(key: _kDoctorEmailKey);
 

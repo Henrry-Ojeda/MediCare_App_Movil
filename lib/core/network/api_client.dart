@@ -134,6 +134,39 @@ class ApiClient {
     );
   }
 
+  Future<List<Map<String, dynamic>>> listDiagnosisPermissions({String? patientId}) async {
+    final res = await _dio.get(
+      '/diagnosis-permissions',
+      queryParameters: patientId != null ? {'patientId': patientId} : null,
+    );
+    return (res.data as List<dynamic>)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> requestDiagnosisPermission({
+    required String patientId,
+    String? consultationId,
+    String? authorDoctorUserId,
+    String? reason,
+  }) async {
+    final res = await _dio.post('/diagnosis-permissions/request', data: {
+      'patientId': patientId,
+      'consultationId': consultationId,
+      'authorDoctorUserId': authorDoctorUserId,
+      'reason': reason,
+    });
+    return Map<String, dynamic>.from(res.data);
+  }
+
+  Future<void> approveDiagnosisPermission(String permissionId) async {
+    await _dio.post('/diagnosis-permissions/$permissionId/approve');
+  }
+
+  Future<void> rejectDiagnosisPermission(String permissionId) async {
+    await _dio.post('/diagnosis-permissions/$permissionId/reject');
+  }
+
   Future<Map<String, dynamic>> processConsultationAi({
     required String transcript,
     String? patientName,
